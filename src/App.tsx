@@ -56,6 +56,7 @@ export default function App() {
         }
       });
     } else {
+      // High-precision block parsing
       const blocks = content.split(/(?=\d{8,20}\s+https?:\/\/)/g).filter(b => b.length > 50);
       
       blocks.forEach((block, idx) => {
@@ -66,42 +67,48 @@ export default function App() {
         let price = 0;
         let shipping = 0;
 
-        // More robust price and shipping detection
         if (priceMatches) {
-          price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
-          
-          // Look for explicit shipping keyword first
+          // Sell price is usually the largest number or the first one
+          const prices = priceMatches.map(m => parseInt(m.replace(/[^0-9]/g, '')));
+          price = Math.max(...prices.filter(p => p > 5000)); // Sellers don't sell under 5000 often for these keywords
+          if (price === -Infinity) price = prices[0];
+
+          // Explicit shipping detection
           const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
           if (shippingMatch) {
-            if (shippingMatch[1].includes('무료')) shipping = 0;
-            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
-          } else if (priceMatches.length >= 2) {
-            // Fallback: second price is often shipping IF it's between 100 and 20000
-            const secondPrice = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
-            if (secondPrice >= 1000 && secondPrice <= 20000) {
-              shipping = secondPrice;
+            if (shippingMatch[1].includes('무료')) {
+              shipping = 0;
+            } else {
+              shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+            }
+          } else {
+            // Check for smaller numbers that could be shipping
+            const smallPrices = prices.filter(p => p >= 1000 && p <= 15000);
+            if (smallPrices.length > 0) {
+              shipping = smallPrices[0];
             }
           }
         }
 
-        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓"];
-        let mall = "정보없음";
+        // Mall Detection Overhaul
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰"];
+        let mall = "";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
 
-        if (mall === "정보없음") {
-           // Improved mall detection: Look for strings that are NOT pure numbers and NOT already used
+        if (!mall) {
            const candidates = block.split(/\s{2,}|\t|\n/).filter(s => 
              s.length >= 2 && 
-             s.length < 20 && 
+             s.length < 15 && 
              !s.includes('원') && 
              !s.includes('http') && 
              !s.includes('구매') && 
              !s.includes('리뷰') &&
-             !/^\d+$/.test(s.trim()) // EXCLUDE PURE NUMBERS
+             !s.includes('등록') &&
+             !/^\d+$/.test(s.trim()) // MUST NOT BE ONLY DIGITS
            );
            
-           // Usually the mall name is near the end or after the price block
            if (candidates.length > 0) {
+             // Usually mall name is after titles or at the end
              mall = candidates[candidates.length - 1].trim();
            }
         }
@@ -116,7 +123,7 @@ export default function App() {
             price,
             shipping,
             totalPrice: price + shipping,
-            mall: cleanText(mall) || "정보없음",
+            mall: mall || "정보없음",
             isAd
           });
         }
@@ -150,7 +157,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Smart Data Cleansing Active</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Smart Data Cleansing Active v2</p>
             </div>
           </div>
         </div>
