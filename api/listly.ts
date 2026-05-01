@@ -11,34 +11,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const naverUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`;
     
-    // Attempt 1: Developer API Endpoint (api.listly.io)
-    // This is the most common endpoint for developers
-    const response = await axios.post('https://api.listly.io/v1/jobs', {
-      url: naverUrl
-    }, {
-      headers: {
-        'Authorization': `Bearer ${api_key}`,
-        'Content-Type': 'application/json'
+    // Attempt with the 'api/single' endpoint mentioned in Listly beta docs
+    // This endpoint often triggers a scrape and returns data if available
+    const response = await axios.get('https://www.listly.io/api/single', {
+      params: {
+        key: api_key,
+        url: naverUrl
       }
     });
 
-    return res.status(200).json({ jobId: response.data.id, status: 'CREATED' });
+    // If it returns data immediately
+    if (response.data && (response.data.results || response.data.data)) {
+      const results = response.data.results || response.data.data;
+      const bestTab = Array.isArray(results) ? results.sort((a, b) => b.length - a.length)[0] : results;
+      return res.status(200).json({ status: 'COMPLETED', results: bestTab });
+    }
+
+    // If it returns a job ID or something else
+    const jobId = response.data.id || response.data.job_id;
+    if (jobId) {
+      return res.status(200).json({ jobId, status: 'CREATED' });
+    }
+
+    throw new Error('Unexpected API response format');
   } catch (error: any) {
-    console.error('Attempt 1 Failed:', error.message);
+    console.error('Listly Single API Error:', error.response?.data || error.message);
     
-    // Attempt 2: Alternative Endpoint with Query Key
+    // Last ditch: try the group endpoint if single fails
     try {
-      const response2 = await axios.post(`https://www.listly.io/api/v1/jobs?api_key=${api_key}`, {
-        url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`
+      const resp2 = await axios.get('https://www.listly.io/api/group', {
+        params: { key: api_key, url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}` }
       });
-      return res.status(200).json({ jobId: response2.data.id, status: 'CREATED' });
+      return res.status(200).json({ results: resp2.data.results || resp2.data.data, status: 'COMPLETED' });
     } catch (e2: any) {
-      // If all fail, return detailed HTML/Text response for debugging
-      const errorDetail = e2.response?.data || error.response?.data || e2.message;
       res.status(500).json({ 
-        error: '모든 API 엔드포인트 접속에 실패했습니다.', 
-        details: typeof errorDetail === 'string' ? errorDetail.substring(0, 500) : JSON.stringify(errorDetail),
-        tried: ['api.listly.io/v1/jobs', 'www.listly.io/api/v1/jobs']
+        error: '리스틀리 API 연동 실패 (Beta)', 
+        details: error.response?.data || error.message,
+        tried_url: 'https://www.listly.io/api/single'
       });
     }
   }
