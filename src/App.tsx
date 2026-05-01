@@ -45,7 +45,11 @@ export default function App() {
       const createRes = await fetch(`/api/listly?q=${encodeURIComponent(keyword)}&api_key=${apiKey}`);
       const createData = await createRes.json();
       
-      if (createData.error) throw new Error(createData.error);
+      if (createData.error) {
+        // 상세 에러 내용이 있다면 함께 표시
+        const details = createData.details ? JSON.stringify(createData.details) : "";
+        throw new Error(`${createData.error} ${details}`);
+      }
       const jobId = createData.jobId;
 
       // 2. Poll for Status

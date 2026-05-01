@@ -23,9 +23,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ jobId, status: createJobResponse.data.status });
   } catch (error: any) {
     console.error('Listly Create Job Error:', error.response?.data || error.message);
+    const details = error.response?.data?.message || error.response?.data || error.message;
     res.status(500).json({ 
       error: 'Listly 작업 생성 중 오류가 발생했습니다.', 
-      details: error.response?.data || error.message 
+      details: details
     });
   }
 }
