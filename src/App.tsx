@@ -41,18 +41,40 @@ export default function App() {
     setResults([]);
 
     try {
-      const response = await fetch(`/api/listly?q=${encodeURIComponent(keyword)}&api_key=${apiKey}`);
-      const data = await response.json();
+      // 1. Create Job
+      const createRes = await fetch(`/api/listly?q=${encodeURIComponent(keyword)}&api_key=${apiKey}`);
+      const createData = await createRes.json();
       
-      if (data.error) {
-        throw new Error(data.error);
-      }
+      if (createData.error) throw new Error(createData.error);
+      const jobId = createData.jobId;
 
-      // Re-use the existing paste logic's mapper
-      processData(data.results);
+      // 2. Poll for Status
+      let attempts = 0;
+      const maxAttempts = 30; // 30 * 2s = 60s max
+      
+      const poll = async () => {
+        if (attempts >= maxAttempts) {
+          throw new Error("수집 시간이 너무 오래 걸립니다. 잠시 후 리스틀리 사이트에서 직접 확인해 주세요.");
+        }
+        
+        attempts++;
+        const statusRes = await fetch(`/api/listly-status?jobId=${jobId}&api_key=${apiKey}`);
+        const statusData = await statusRes.json();
+        
+        if (statusData.status === 'COMPLETED') {
+          processData(statusData.results);
+          setIsLoading(false);
+        } else if (statusData.status === 'FAILED') {
+          throw new Error("리스틀리 작업이 실패했습니다.");
+        } else {
+          // Still processing, wait 2 seconds and poll again
+          setTimeout(poll, 2000);
+        }
+      };
+
+      setTimeout(poll, 2000);
     } catch (err: any) {
       setError(err.message || "자동 추출 중 오류가 발생했습니다.");
-    } finally {
       setIsLoading(false);
     }
   };
