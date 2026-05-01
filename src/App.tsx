@@ -18,11 +18,72 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [myPrice, setMyPrice] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+  const [apiKey, setApiKey] = useState('I4sxSwftWCGvLkEGR353OzMkl3Uf2thi');
 
   const stats = {
-    min: results.length > 0 ? Math.min(...results.map(p => parseInt(String(p.price).replace(/[^0-9]/g, '')) || Infinity)) : 0,
+    min: results.length > 0 ? Math.min(...results.map(p => {
+      const val = parseInt(String(p.price).replace(/[^0-9]/g, ''));
+      return isNaN(val) ? Infinity : val;
+    })) : 0,
     avg: results.length > 0 ? Math.round(results.reduce((acc, p) => acc + (parseInt(String(p.price).replace(/[^0-9]/g, '')) || 0), 0) / results.length) : 0,
     count: results.length
+  };
+
+  const handleAutoSearch = async () => {
+    if (!keyword.trim()) return;
+    if (!apiKey.trim()) {
+      setError("API 키가 필요합니다.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setResults([]);
+
+    try {
+      const response = await fetch(`/api/listly?q=${encodeURIComponent(keyword)}&api_key=${apiKey}`);
+      const data = await response.json();
+      
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      // Re-use the existing paste logic's mapper
+      processData(data.results);
+    } catch (err: any) {
+      setError(err.message || "자동 추출 중 오류가 발생했습니다.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const processData = (rawData: any[]) => {
+    const mappedProducts: Product[] = rawData.map((item: any, idx: number) => {
+      const keys = Object.keys(item);
+      const findValue = (regex: RegExp, fallback: any = "") => {
+        const key = keys.find(k => regex.test(k));
+        return key ? String(item[key]).trim() : fallback;
+      };
+
+      let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i, item.image);
+      if (imgSrc && imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+
+      return {
+        id: idx,
+        image: imgSrc,
+        title: findValue(/제목|상품명|명칭|title|name|text/i, item.title),
+        price: findValue(/가격|금액|원|price|cost/i, item.price),
+        shipping: findValue(/배송|택배|운임|shipping|delivery/i, item.shipping) || "정보없음",
+        mall: findValue(/판매처|스토어|몰|mall|seller|source/i, item.mall) || "네이버페이"
+      };
+    }).filter(p => p.title && p.title.length > 2);
+
+    if (mappedProducts.length > 0) {
+      setResults(mappedProducts);
+      setError(null);
+    } else {
+      setError("검색 결과를 찾을 수 없습니다.");
+    }
   };
 
   const handlePaste = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -172,13 +233,30 @@ export default function App() {
                   <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="검색 키워드 입력" className="w-full pl-10 pr-4 py-4 bg-white rounded-2xl border-2 border-transparent shadow-sm focus:border-[#03c75a] outline-none transition-all" />
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                 </div>
-                <button onClick={openNaver} className="px-6 py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center gap-2"><ExternalLink size={20} /> 검색</button>
+                <button 
+                  onClick={handleAutoSearch} 
+                  disabled={isLoading}
+                  className="px-6 py-4 bg-[#03c75a] text-white rounded-2xl font-black hover:bg-[#02a64a] disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-green-500/20"
+                >
+                  {isLoading ? <Loader2 className="animate-spin" /> : <ShoppingBag size={20} />}
+                  자동 추출
+                </button>
+                <button onClick={openNaver} className="p-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center"><ExternalLink size={20} /></button>
               </div>
-              <textarea onChange={handlePaste} placeholder="리스틀리에서 복사한 데이터를 여기에 붙여넣으세요..." className="w-full h-44 p-6 bg-white rounded-2xl border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] outline-none transition-all resize-none text-sm text-slate-600" />
+              <div className="relative group">
+                <textarea onChange={handlePaste} placeholder="또는 리스틀리 수동 복사본을 여기에 붙여넣으세요..." className="w-full h-32 p-6 bg-white rounded-2xl border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] outline-none transition-all resize-none text-xs text-slate-600" />
+                {isLoading && (
+                  <div className="absolute inset-0 bg-white/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center gap-3">
+                    <Loader2 className="animate-spin text-[#03c75a]" size={32} />
+                    <p className="text-xs font-bold text-slate-500">리스틀리가 네이버에서 수집 중입니다 (약 10초)...</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="space-y-6">
-              <div className="bg-[#03c75a]/5 border border-[#03c75a]/20 p-6 rounded-3xl">
+              <div className="bg-[#03c75a]/5 border border-[#03c75a]/20 p-6 rounded-3xl relative overflow-hidden">
+                <div className="absolute -top-6 -right-6 w-24 h-24 bg-[#03c75a]/10 rounded-full" />
                 <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2">🛒 내 판매가 설정</h3>
                 <input type="number" value={myPrice || ''} onChange={(e) => setMyPrice(Number(e.target.value))} placeholder="판매중인 가격 입력" className="w-full px-5 py-4 bg-white rounded-2xl border-2 border-transparent shadow-sm focus:border-[#03c75a] outline-none transition-all font-black text-xl" />
                 <div className="flex bg-white p-1 rounded-xl border border-slate-200 mt-4 shadow-sm">
