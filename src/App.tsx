@@ -213,7 +213,7 @@ export default function App() {
                           <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${diff < 0 ? 'bg-red-50/30' : ''}`}>
                             <td className="px-8 py-6 text-center">
                               {p.image ? (
-                                <img src={p.image} className="w-32 h-32 rounded-2xl object-cover border-2 border-white shadow-xl mx-auto bg-slate-50 transition-transform hover:scale-110" referrerPolicy="no-referrer" />
+                                <img src={p.image} className="w-32 h-32 rounded-2xl object-contain border-2 border-white shadow-xl mx-auto bg-slate-50 transition-transform hover:scale-110" referrerPolicy="no-referrer" />
                               ) : (
                                 <div className="w-32 h-32 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-200 mx-auto"><ImageIcon size={32} /></div>
                               )}
