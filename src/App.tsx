@@ -18,60 +18,82 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const handlePaste = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
-    if (!value.trim()) return;
+    const value = e.target.value.trim();
+    if (!value) return;
 
     try {
-      // Try parsing as JSON first (Listly JSON export)
       let parsedData: any[] = [];
       
+      // 1. JSON 형태 시도
       if (value.startsWith('[') || value.startsWith('{')) {
-        parsedData = JSON.parse(value);
-        if (!Array.isArray(parsedData) && typeof parsedData === 'object') {
-          // Sometimes it's { data: [...] }
-          parsedData = (parsedData as any).data || Object.values(parsedData)[0];
+        try {
+          const json = JSON.parse(value);
+          parsedData = Array.isArray(json) ? json : (json.data || Object.values(json)[0] || []);
+        } catch (e) {
+          console.log("JSON parse failed, trying other formats");
         }
-      } else {
-        // Fallback: Try parsing as Tab-separated (when copying table directly)
-        const lines = value.split('\n');
-        const headers = lines[0].split('\t');
-        parsedData = lines.slice(1).map(line => {
-          const cells = line.split('\t');
-          const obj: any = {};
-          headers.forEach((h, i) => { obj[h] = cells[i]; });
-          return obj;
-        });
+      } 
+      
+      // 2. JSON 실패 시 또는 JSON이 아닐 때 Tab/Comma 구분 시도
+      if (parsedData.length === 0) {
+        const lines = value.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length > 0) {
+          // Tab (\t) 또는 Comma (,) 구분자 감지
+          const firstLine = lines[0];
+          const delimiter = firstLine.includes('\t') ? '\t' : (firstLine.includes(',') ? ',' : null);
+          
+          if (delimiter) {
+            const headers = firstLine.split(delimiter).map(h => h.trim().replace(/"/g, ''));
+            parsedData = lines.slice(1).map(line => {
+              const cells = line.split(delimiter).map(c => c.trim().replace(/"/g, ''));
+              const obj: any = {};
+              headers.forEach((h, i) => { if (h) obj[h] = cells[i]; });
+              return obj;
+            });
+          }
+        }
       }
 
-      // Map Listly columns to our Product structure
-      // Listly columns are often named by their header text
+      // 3. 그래도 데이터가 없다면 한 줄짜리 데이터인지 확인 (필드 유추)
+      if (parsedData.length === 0 && value.length > 50) {
+        // 혹시 모르니 그냥 텍스트 덩어리에서 패턴 추출 시도 (최후의 수단)
+        setError("데이터 형식을 인식할 수 없습니다. 리스틀리 결과 페이지에서 [JSON] 버튼을 눌러 나오는 내용을 복사해 주세요.");
+        return;
+      }
+
+      // 데이터 매핑 로직 강화
       const mappedProducts: Product[] = parsedData.map((item: any, idx: number) => {
-        // Find keys that might represent our fields
         const keys = Object.keys(item);
         const findValue = (regex: RegExp) => {
           const key = keys.find(k => regex.test(k));
-          return key ? item[key] : "";
+          return key ? String(item[key]).trim() : "";
         };
+
+        // 이미지 URL이 상대경로인 경우 보정
+        let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i);
+        if (imgSrc && imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
 
         return {
           id: idx,
-          image: findValue(/이미지|사진|image|thumb/i),
-          title: findValue(/제목|상품명|title|name/i),
-          price: findValue(/가격|price/i),
-          shipping: findValue(/배송|택배|shipping/i) || "정보없음",
-          mall: findValue(/판매처|스토어|mall|seller/i) || "네이버페이"
+          image: imgSrc,
+          title: findValue(/제목|상품명|명칭|title|name|text/i),
+          price: findValue(/가격|금액|원|price|cost/i),
+          shipping: findValue(/배송|택배|운임|shipping|delivery/i) || "정보없음",
+          mall: findValue(/판매처|스토어|몰|mall|seller|source/i) || "네이버페이"
         };
-      }).filter(p => p.title && p.price);
+      }).filter(p => p.title && (p.price || p.image));
 
       if (mappedProducts.length > 0) {
         setResults(mappedProducts);
         setError(null);
+        // 성공 시 텍스트 영역 비우기 (선택사항)
+        // e.target.value = ""; 
       } else {
-        setError("데이터 형식이 올바르지 않거나 유효한 상품 정보를 찾을 수 없습니다.");
+        setError("상품 정보를 찾을 수 없습니다. 리스틀리 상단의 [JSON] 버튼을 눌러 전체 내용을 복사했는지 확인해 주세요.");
       }
     } catch (err) {
       console.error("Paste error:", err);
-      setError("데이터를 분석하는 중 오류가 발생했습니다. 리스틀리에서 '복사'를 제대로 하셨는지 확인해 주세요.");
+      setError("데이터 분석 중 오류가 발생했습니다. 올바른 형식의 데이터를 붙여넣어 주세요.");
     }
   };
 
