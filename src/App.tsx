@@ -36,7 +36,7 @@ export default function App() {
 
     let parsed: Product[] = [];
     
-    // 1. Try Excel/TSV Parsing first
+    // Excel/TSV Parsing
     const lines = content.split(/\r?\n/);
     const isTSV = lines.length > 0 && lines[0].split('\t').length > 5;
 
@@ -57,9 +57,8 @@ export default function App() {
       });
     } 
     
-    // 2. If TSV failed or it's raw text, use "Greedy Block Parser" (v2.4)
+    // Raw Text Parsing (v2.5)
     if (parsed.length === 0) {
-      // Split by image URL, regardless of line breaks
       const blocks = content.split(/(?=https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\?type=))/i).filter(b => b.length > 20);
       
       blocks.forEach((block, idx) => {
@@ -71,37 +70,46 @@ export default function App() {
         let shipping = 0;
 
         if (priceMatches) {
-          const prices = priceMatches.map(m => parseInt(m.replace(/[^0-9]/g, '')));
-          price = prices[0];
+          // Filter out potential points or small numbers incorrectly tagged as prices
+          const prices = priceMatches.map(m => parseInt(m.replace(/[^0-9]/g, ''))).filter(p => p > 500);
+          price = prices[0] || 0;
           
-          const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
-          if (shippingMatch) {
-            if (shippingMatch[1].includes('무료')) shipping = 0;
-            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+          if (block.includes('배송비 무료')) {
+            shipping = 0;
           } else {
-            // Find a price in shipping range (1000~15000) that isn't the main price
-            for (let i = 1; i < prices.length; i++) {
-              if (prices[i] >= 1000 && prices[i] <= 15000 && prices[i] !== price) {
-                shipping = prices[i];
-                break;
-              }
+            const shippingMatch = block.match(/배송비\s*([\d,]+원|[\d,]+)/i);
+            if (shippingMatch) {
+              shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+            } else if (prices.length >= 2) {
+              // Only take second price as shipping if it's in standard range
+              const secondPrice = prices[1];
+              if (secondPrice >= 1000 && secondPrice <= 15000) shipping = secondPrice;
             }
           }
         }
 
-        // Improved Mall Detection
-        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리"];
-        let mall = "정보없음";
+        // Hardened Mall Detection
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리", "인터파크", "옥션", "G마켓", "11번가", "쿠팡", "판매처"];
+        let mall = "";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
 
-        if (mall === "정보없음") {
-           const candidates = block.split(/\s{2,}|\t|\n/).filter(s => 
-             s.length >= 2 && s.length < 15 && !s.includes('원') && !s.includes('http') && !s.includes('구매') && !/^\d+$/.test(s.trim())
+        if (!mall) {
+           // Find strings that are NOT just numbers and HAVE Korean characters
+           const candidates = block.split(/\s+|\t|\n/).filter(s => 
+             s.length >= 2 && 
+             s.length < 20 && 
+             !s.includes('원') && 
+             !s.includes('http') && 
+             !s.includes('구매') && 
+             !s.includes('리뷰') &&
+             !s.includes('찜') &&
+             !s.includes('최대') &&
+             /[가-힣]/.test(s) && // MUST contain Korean
+             !/^[0-9]+$/.test(s.replace(/[^0-9]/g, '')) // MUST NOT be purely numeric
            );
            if (candidates.length > 0) mall = candidates[candidates.length - 1].trim();
         }
 
-        // Improved Title Detection
         const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원') && !s.includes('catId') && !s.includes('nvMid'));
 
         if (titleCandidate && price > 0) {
@@ -112,7 +120,7 @@ export default function App() {
             price,
             shipping,
             totalPrice: price + shipping,
-            mall: cleanText(mall) || "정보없음",
+            mall: cleanText(mall) || "확인불가",
             isAd
           });
         }
@@ -140,7 +148,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Greedy All-in-One Engine v2.4</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Nuclear Filtering Engine v2.5</p>
             </div>
           </div>
         </div>
