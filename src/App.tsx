@@ -19,6 +19,12 @@ export default function App() {
   const [myPrice, setMyPrice] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
+  const cleanText = (text: string) => {
+    if (!text) return "";
+    // Remove long URLs and noise
+    return text.replace(/https?:\/\/[^\s\t\n]+/g, '').replace(/LABEL-\d+/g, '').trim();
+  };
+
   const handlePaste = (e: React.ClipboardEvent | React.ChangeEvent<HTMLTextAreaElement>) => {
     let content = "";
     if ('clipboardData' in e) {
@@ -29,33 +35,28 @@ export default function App() {
 
     if (!content.trim()) return;
 
-    // Smart Parsing Logic
     const lines = content.split(/\r?\n/).filter(line => line.trim().length > 10);
     const parsed: Product[] = [];
-
-    // Check if it's TSV (Excel) or Raw Text (Listly)
     const isTSV = content.includes('\t');
 
     if (isTSV) {
-      // Excel/TSV Mode
       lines.forEach((line, idx) => {
         const cols = line.split('\t');
-        const title = cols[5]?.trim() || "";
+        const title = cleanText(cols[5] || "");
         const rawPrice = cols[7]?.replace(/[^0-9]/g, '') || "0";
         const rawShipping = cols[9]?.replace(/[^0-9]/g, '') || "0";
-        const mall = cols[33]?.trim() || "";
+        const mall = cleanText(cols[33] || "");
         const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
 
         const price = parseInt(rawPrice);
         const shipping = parseInt(rawShipping);
         
-        if (!isNaN(price) && title && !title.startsWith('LABEL-') && title !== "TITLE" && title !== "상품명") {
+        if (!isNaN(price) && title && price > 100) {
           parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가" });
         }
       });
     } else {
-      // Intelligent Raw Text Mode (Heuristics)
-      // Listly raw text often puts Image, Title, Price, Shipping, Mall in a sequence or block
+      // Improved block parsing for raw text
       const blocks = content.split(/(?=\d{8,20}\s+https?:\/\/)/g).filter(b => b.length > 50);
       
       blocks.forEach((block, idx) => {
@@ -63,16 +64,13 @@ export default function App() {
         const priceMatch = block.match(/([\d,]+)원/g);
         const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
         
-        // Mall is often after the price/shipping block
-        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식"];
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점"];
         let mall = "정보없음";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
-        
-        // If mall is still "정보없음", try to find it near the end of a line
+
         if (mall === "정보없음") {
-           const linesInBlock = block.split('\n');
-           const lastMeaningfulLine = linesInBlock.find(l => l.length > 2 && l.length < 15 && !l.includes('원') && !l.includes('http'));
-           if (lastMeaningfulLine) mall = lastMeaningfulLine.trim();
+           const potentialMall = block.split(/\s{2,}|\t|\n/).find(s => s.length > 2 && s.length < 15 && !s.includes('원') && !s.includes('http') && !s.includes('구매'));
+           if (potentialMall) mall = potentialMall.trim();
         }
 
         const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원'));
@@ -83,20 +81,18 @@ export default function App() {
           parsed.push({
             id: idx,
             image: imageMatch ? imageMatch[0] : "",
-            title: titleCandidate.trim(),
+            title: cleanText(titleCandidate),
             price,
             shipping,
             totalPrice: price + shipping,
-            mall
+            mall: cleanText(mall) || "정보없음"
           });
         }
       });
     }
 
-    // Final fallback: If no blocks found, try line by line with simple regex
     if (parsed.length === 0) {
       lines.forEach((line, idx) => {
-        if (line.includes('LABEL-')) return; // Filter LABEL-x noise
         const img = line.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
         const prc = line.match(/([\d,]+)원/);
         const shp = line.match(/배송비\s*([\d,]+)원/);
@@ -104,15 +100,14 @@ export default function App() {
         
         if (ttl && prc) {
           const price = parseInt(prc[1].replace(/[^0-9]/g, ''));
-          const shipping = shp ? parseInt(shp[1].replace(/[^0-9]/g, '')) : 0;
           parsed.push({
             id: idx,
             image: img ? img[0] : "",
-            title: ttl[0].trim(),
+            title: cleanText(ttl[0]),
             price,
-            shipping,
-            totalPrice: price + shipping,
-            mall: "분석중"
+            shipping: shp ? parseInt(shp[1].replace(/[^0-9]/g, '')) : 0,
+            totalPrice: price + (shp ? parseInt(shp[1].replace(/[^0-9]/g, '')) : 0),
+            mall: "분석됨"
           });
         }
       });
@@ -144,12 +139,12 @@ export default function App() {
               <ShoppingBag size={24} />
             </div>
             <div>
-              <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Excel & Raw Analyzer</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Intelligent Extraction Mode</p>
+              <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Cleaner Price Analyzer</h1>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Url Filtering & Large Image Mode</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-xs font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">Paste Anything</span>
+            <span className="text-xs font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">Pro Mode</span>
           </div>
         </div>
       </header>
@@ -169,17 +164,10 @@ export default function App() {
               </div>
 
               <div className="relative">
-                <div className={`absolute inset-0 bg-white/40 backdrop-blur-[2px] z-10 flex flex-col items-center justify-center rounded-[2rem] transition-all pointer-events-none ${results.length > 0 ? 'opacity-0' : 'opacity-100'}`}>
-                  <div className="w-20 h-20 bg-white rounded-3xl shadow-2xl flex items-center justify-center text-[#03c75a] mb-4 border border-slate-100">
-                    <ImageIcon size={40} />
-                  </div>
-                  <p className="font-black text-slate-800 text-lg">데이터를 여기에 붙여넣으세요 (Ctrl+V)</p>
-                  <p className="text-xs text-slate-400 font-bold mt-2">라벨/노이즈를 걸러내고 이미지를 추출합니다</p>
-                </div>
                 <textarea 
                   onPaste={handlePaste}
-                  className="w-full h-80 p-8 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] outline-none transition-all resize-none text-[10px] text-slate-300 font-mono"
-                  placeholder="리스틀리 복사본 붙여넣기 대기 중..."
+                  className="w-full h-40 p-8 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] outline-none transition-all resize-none text-[10px] text-slate-300 font-mono"
+                  placeholder="리스틀리 복사본 붙여넣기 (Ctrl+V)..."
                 />
               </div>
             </div>
@@ -187,23 +175,11 @@ export default function App() {
 
           <div className="space-y-6">
             <div className="bg-[#03c75a] text-white p-8 rounded-[2.5rem] shadow-2xl shadow-green-900/10">
-              <h3 className="text-sm font-black text-white/60 mb-6 flex items-center gap-2">💰 내 타겟 판매가 (합산 기준)</h3>
+              <h3 className="text-sm font-black text-white/60 mb-4 flex items-center gap-2">💰 내 타겟 판매가</h3>
               <div className="relative mb-6">
                 <input type="number" value={myPrice || ''} onChange={(e) => setMyPrice(Number(e.target.value))} placeholder="비교할 가격" className="w-full px-6 py-5 bg-white/20 rounded-2xl border-2 border-white/10 focus:border-white outline-none transition-all font-black text-3xl text-white placeholder:text-white/40" />
                 <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-white/30 text-xl">원</span>
               </div>
-              {results.length > 0 && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-white/10 p-4 rounded-2xl">
-                    <div className="text-[10px] font-black text-white/60 uppercase mb-1">최저 합산가</div>
-                    <div className="text-lg font-black text-white">{stats.min.toLocaleString()}원</div>
-                  </div>
-                  <div className="bg-white/10 p-4 rounded-2xl">
-                    <div className="text-[10px] font-black text-white/60 uppercase mb-1">분석 상품수</div>
-                    <div className="text-lg font-black text-white">{stats.count}개</div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -212,21 +188,17 @@ export default function App() {
           {results.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} className="mt-12">
               <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
-                <div className="px-10 py-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <div className="px-10 py-6 bg-slate-50 border-b border-slate-200">
                   <h2 className="font-black text-slate-800 flex items-center gap-2"><List size={20} /> 분석 결과 ({results.length}개 상품)</h2>
-                  <div className="flex items-center gap-4 text-[10px] font-black text-[#03c75a] uppercase tracking-widest">
-                    <span>Smart Extraction Enabled</span>
-                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200">
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">이미지</th>
-                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[300px]">상품명</th>
+                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[300px]">상품 상세 정보</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right bg-slate-100/50 min-w-[150px]">합산 가격</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[120px]">판매가</th>
-                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[100px]">배송비</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center min-w-[150px]">판매처</th>
                       </tr>
                     </thead>
@@ -235,30 +207,29 @@ export default function App() {
                         const diff = myPrice ? p.totalPrice - myPrice : 0;
                         return (
                           <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${diff < 0 ? 'bg-red-50/30' : ''}`}>
-                            <td className="px-8 py-5 text-center">
+                            <td className="px-8 py-6 text-center">
                               {p.image ? (
-                                <img src={p.image} className="w-16 h-16 rounded-xl object-cover border border-slate-100 shadow-sm mx-auto bg-slate-50" referrerPolicy="no-referrer" />
+                                <img src={p.image} className="w-32 h-32 rounded-2xl object-cover border-2 border-white shadow-xl mx-auto bg-slate-50 transition-transform hover:scale-110" referrerPolicy="no-referrer" />
                               ) : (
-                                <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center text-slate-300 mx-auto"><ImageIcon size={20} /></div>
+                                <div className="w-32 h-32 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-200 mx-auto"><ImageIcon size={32} /></div>
                               )}
                             </td>
-                            <td className="px-8 py-5">
-                              <span className="font-bold text-sm text-slate-800 break-words leading-snug">
+                            <td className="px-8 py-6">
+                              <span className="font-black text-base text-slate-800 break-words leading-snug">
                                 {p.title}
                               </span>
                             </td>
-                            <td className="px-8 py-5 text-right font-black text-slate-900 text-xl bg-slate-50/30 whitespace-nowrap">
+                            <td className="px-8 py-6 text-right font-black text-slate-900 text-2xl bg-slate-50/30 whitespace-nowrap">
                               {p.totalPrice.toLocaleString()}원
                               {myPrice > 0 && diff !== 0 && (
-                                <div className={`text-[10px] mt-1 font-black ${diff < 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                                <div className={`text-xs mt-1 font-black ${diff < 0 ? 'text-red-500' : 'text-blue-500'}`}>
                                   {diff > 0 ? '+' : ''}{diff.toLocaleString()}원
                                 </div>
                               )}
                             </td>
-                            <td className="px-8 py-5 text-right font-bold text-slate-500 text-sm whitespace-nowrap">{p.price.toLocaleString()}원</td>
-                            <td className="px-8 py-5 text-right font-bold text-slate-500 text-sm whitespace-nowrap">{p.shipping === 0 ? '무료' : `${p.shipping.toLocaleString()}원`}</td>
-                            <td className="px-8 py-5 text-center">
-                              <span className="text-[10px] font-black text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg inline-block min-w-[80px]">
+                            <td className="px-8 py-6 text-right font-bold text-slate-400 text-sm whitespace-nowrap">{p.price.toLocaleString()}원</td>
+                            <td className="px-8 py-6 text-center">
+                              <span className="text-xs font-black text-slate-700 bg-white border-2 border-slate-100 px-4 py-2 rounded-xl inline-block shadow-sm">
                                 {p.mall}
                               </span>
                             </td>
