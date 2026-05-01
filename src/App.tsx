@@ -21,7 +21,6 @@ export default function App() {
 
   const cleanText = (text: string) => {
     if (!text) return "";
-    // Remove long URLs and noise
     return text.replace(/https?:\/\/[^\s\t\n]+/g, '').replace(/LABEL-\d+/g, '').trim();
   };
 
@@ -56,15 +55,43 @@ export default function App() {
         }
       });
     } else {
-      // Improved block parsing for raw text
+      // Improved block parsing for raw text with better shipping detection
       const blocks = content.split(/(?=\d{8,20}\s+https?:\/\/)/g).filter(b => b.length > 50);
       
       blocks.forEach((block, idx) => {
         const imageMatch = block.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
-        const priceMatch = block.match(/([\d,]+)원/g);
-        const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
         
-        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점"];
+        // Find all price-like patterns (numbers followed by '원')
+        const priceMatches = block.match(/([\d,]+)원/g);
+        
+        // Strategy: First price is usually Selling Price, second is usually Shipping (unless it's a huge number)
+        let price = 0;
+        let shipping = 0;
+
+        if (priceMatches && priceMatches.length >= 2) {
+           price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
+           shipping = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
+           
+           // If second price is > 30000, it's probably not shipping (maybe original price)
+           // Unless first price is also huge. Standard shipping is usually < 20000.
+           if (shipping > 30000 && shipping > price) {
+             shipping = 0; // Likely original price, not shipping
+           }
+        } else if (priceMatches && priceMatches.length === 1) {
+           price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
+        }
+
+        // Secondary check for "배송비" keyword if the above strategy is unsure
+        const explicitShipping = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
+        if (explicitShipping) {
+          if (explicitShipping[1].includes('무료')) {
+            shipping = 0;
+          } else {
+            shipping = parseInt(explicitShipping[1].replace(/[^0-9]/g, ''));
+          }
+        }
+
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "판매처"];
         let mall = "정보없음";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
 
@@ -75,9 +102,7 @@ export default function App() {
 
         const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원'));
 
-        if (titleCandidate && priceMatch) {
-          const price = parseInt(priceMatch[0].replace(/[^0-9]/g, ''));
-          const shipping = shippingMatch ? (shippingMatch[1].includes('무료') ? 0 : parseInt(shippingMatch[1].replace(/[^0-9]/g, ''))) : 0;
+        if (titleCandidate && price > 0) {
           parsed.push({
             id: idx,
             image: imageMatch ? imageMatch[0] : "",
@@ -86,28 +111,6 @@ export default function App() {
             shipping,
             totalPrice: price + shipping,
             mall: cleanText(mall) || "정보없음"
-          });
-        }
-      });
-    }
-
-    if (parsed.length === 0) {
-      lines.forEach((line, idx) => {
-        const img = line.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
-        const prc = line.match(/([\d,]+)원/);
-        const shp = line.match(/배송비\s*([\d,]+)원/);
-        const ttl = line.match(/[가-힣\w\s]{10,}/);
-        
-        if (ttl && prc) {
-          const price = parseInt(prc[1].replace(/[^0-9]/g, ''));
-          parsed.push({
-            id: idx,
-            image: img ? img[0] : "",
-            title: cleanText(ttl[0]),
-            price,
-            shipping: shp ? parseInt(shp[1].replace(/[^0-9]/g, '')) : 0,
-            totalPrice: price + (shp ? parseInt(shp[1].replace(/[^0-9]/g, '')) : 0),
-            mall: "분석됨"
           });
         }
       });
