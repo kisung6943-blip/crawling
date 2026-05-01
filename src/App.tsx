@@ -164,11 +164,11 @@ export default function App() {
                 <table className="w-full text-left">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest">상품명 (F)</th>
-                      <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right bg-slate-100/50">합산 가격 (H+J)</th>
-                      <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">판매가 (H)</th>
-                      <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">배송비 (J)</th>
-                      <th className="px-10 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">판매처 (AH)</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[300px]">상품명 (F)</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right bg-slate-100/50 min-w-[150px]">합산 가격 (H+J)</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[120px]">판매가 (H)</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[100px]">배송비 (J)</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center min-w-[150px]">판매처 (AH)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -176,8 +176,12 @@ export default function App() {
                       const diff = myPrice ? p.totalPrice - myPrice : 0;
                       return (
                         <tr key={p.id} className={`hover:bg-slate-50 transition-colors ${diff < 0 ? 'bg-red-50/30' : ''}`}>
-                          <td className="px-10 py-5"><span className="font-bold text-sm text-slate-800 line-clamp-1">{p.title}</span></td>
-                          <td className="px-10 py-5 text-right font-black text-slate-900 text-xl bg-slate-50/30">
+                          <td className="px-8 py-5">
+                            <span className="font-bold text-sm text-slate-800 break-words leading-snug">
+                              {p.title}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 text-right font-black text-slate-900 text-xl bg-slate-50/30 whitespace-nowrap">
                             {p.totalPrice.toLocaleString()}원
                             {myPrice > 0 && diff !== 0 && (
                               <div className={`text-[10px] mt-1 font-black ${diff < 0 ? 'text-red-500' : 'text-blue-500'}`}>
@@ -185,9 +189,13 @@ export default function App() {
                               </div>
                             )}
                           </td>
-                          <td className="px-10 py-5 text-right font-bold text-slate-500 text-sm">{p.price.toLocaleString()}원</td>
-                          <td className="px-10 py-5 text-right font-bold text-slate-500 text-sm">{p.shipping === 0 ? '무료' : `${p.shipping.toLocaleString()}원`}</td>
-                          <td className="px-10 py-5 text-center"><span className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-lg">{p.mall}</span></td>
+                          <td className="px-8 py-5 text-right font-bold text-slate-500 text-sm whitespace-nowrap">{p.price.toLocaleString()}원</td>
+                          <td className="px-8 py-5 text-right font-bold text-slate-500 text-sm whitespace-nowrap">{p.shipping === 0 ? '무료' : `${p.shipping.toLocaleString()}원`}</td>
+                          <td className="px-8 py-5 text-center">
+                            <span className="text-[10px] font-black text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-lg inline-block min-w-[80px]">
+                              {p.mall || '정보없음'}
+                            </span>
+                          </td>
                         </tr>
                       );
                     })}
