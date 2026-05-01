@@ -254,19 +254,6 @@ export default function App() {
         <section className="mb-12">
           <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-4">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="검색 키워드 입력" className="w-full pl-10 pr-4 py-4 bg-white rounded-2xl border-2 border-transparent shadow-sm focus:border-[#03c75a] outline-none transition-all" />
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                </div>
-                <button 
-                  onClick={handleAutoSearch} 
-                  disabled={isLoading}
-                  className="px-6 py-4 bg-[#03c75a] text-white rounded-2xl font-black hover:bg-[#02a64a] disabled:opacity-50 transition-all flex items-center gap-2 shadow-lg shadow-green-500/20"
-                >
-                  {isLoading ? <Loader2 className="animate-spin" /> : <ShoppingBag size={20} />}
-                  자동 추출
-                </button>
                 <button onClick={openNaver} className="p-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center"><ExternalLink size={20} /></button>
               </div>
               <div className="relative group">
