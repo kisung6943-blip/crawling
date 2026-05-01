@@ -29,65 +29,89 @@ export default function App() {
         try {
           const json = JSON.parse(value);
           parsedData = Array.isArray(json) ? json : (json.data || Object.values(json)[0] || []);
-        } catch (e) {
-          console.log("JSON parse failed, trying other formats");
-        }
+        } catch (e) { }
       } 
       
-      // 2. JSON 실패 시 또는 JSON이 아닐 때 Tab/Comma 구분 시도
+      // 2. 구분자(Tab/Comma) 기반 시도
       if (parsedData.length === 0) {
         const lines = value.split(/\r?\n/).filter(l => l.trim());
-        if (lines.length > 0) {
-          // Tab (\t) 또는 Comma (,) 구분자 감지
-          const firstLine = lines[0];
-          const delimiter = firstLine.includes('\t') ? '\t' : (firstLine.includes(',') ? ',' : null);
+        const firstLine = lines[0] || "";
+        const delimiter = firstLine.includes('\t') ? '\t' : (firstLine.includes(',') ? ',' : null);
+        
+        if (delimiter) {
+          const headers = firstLine.split(delimiter).map(h => h.trim().replace(/"/g, ''));
+          parsedData = lines.slice(1).map(line => {
+            const cells = line.split(delimiter).map(c => c.trim().replace(/"/g, ''));
+            const obj: any = {};
+            headers.forEach((h, i) => { if (h) obj[h] = cells[i]; });
+            return obj;
+          });
+        }
+      }
+
+      // 3. 지능형 패턴 추출 (구조가 깨진 텍스트 블록)
+      if (parsedData.length === 0) {
+        // 상품 제목, 가격, 배송비 등의 키워드가 포함된 텍스트 덩어리를 분석
+        // 보통 상품 하나당 이미지 URL과 정보 텍스트가 순차적으로 나옴
+        const textBlocks = value.split(/(https?:\/\/[^\s]+(?:\.jpg|\.png|\.gif|\.jpeg)[^\s]*)/i).filter(b => b.trim());
+        
+        for (let i = 0; i < textBlocks.length; i++) {
+          const block = textBlocks[i].trim();
           
-          if (delimiter) {
-            const headers = firstLine.split(delimiter).map(h => h.trim().replace(/"/g, ''));
-            parsedData = lines.slice(1).map(line => {
-              const cells = line.split(delimiter).map(c => c.trim().replace(/"/g, ''));
-              const obj: any = {};
-              headers.forEach((h, i) => { if (h) obj[h] = cells[i]; });
-              return obj;
+          // 이미지 주소인 경우
+          if (block.match(/^https?:\/\//i)) {
+            const nextBlock = textBlocks[i + 1] || "";
+            // 다음 블록에서 정보 추출
+            const priceMatch = nextBlock.match(/([\d,]+)원|최저\s*([\d,]+)/);
+            const shippingMatch = nextBlock.match(/배송비\s*([\d,]+원|무료|[\d,]+)/);
+            const mallMatch = nextBlock.match(/판매처\s*(\d+)|([가-힣\w\s]+몰|[가-힣\w\s]+닷컴|[가-힣\w\s]+점)/);
+            
+            // 제목 추출 (보통 블록의 앞부분)
+            const titleLines = nextBlock.split(/\n/);
+            const title = titleLines[0].length > 5 ? titleLines[0] : (titleLines[1] || block).substring(0, 100);
+
+            parsedData.push({
+              image: block,
+              title: title.trim(),
+              price: priceMatch ? (priceMatch[1] || priceMatch[2]) : "정보없음",
+              shipping: shippingMatch ? shippingMatch[1] || shippingMatch[0] : "정보없음",
+              mall: mallMatch ? mallMatch[1] || mallMatch[2] || mallMatch[0] : "네이버페이"
             });
+            i++; // 정보 블록 건너뜀
           }
         }
       }
 
-      // 3. 그래도 데이터가 없다면 한 줄짜리 데이터인지 확인 (필드 유추)
-      if (parsedData.length === 0 && value.length > 50) {
-        // 혹시 모르니 그냥 텍스트 덩어리에서 패턴 추출 시도 (최후의 수단)
-        setError("데이터 형식을 인식할 수 없습니다. 리스틀리 결과 페이지에서 [JSON] 버튼을 눌러 나오는 내용을 복사해 주세요.");
-        return;
+      // 최후의 수단: 줄바꿈 기반으로 그냥 다 넣기
+      if (parsedData.length === 0) {
+        const lines = value.split(/\n/).filter(l => l.trim().length > 10);
+        parsedData = lines.map(line => ({ title: line, price: "분석실패" }));
       }
 
-      // 데이터 매핑 로직 강화
+      // 데이터 매핑 및 보정
       const mappedProducts: Product[] = parsedData.map((item: any, idx: number) => {
         const keys = Object.keys(item);
-        const findValue = (regex: RegExp) => {
+        const findValue = (regex: RegExp, fallback: string = "") => {
           const key = keys.find(k => regex.test(k));
-          return key ? String(item[key]).trim() : "";
+          return key ? String(item[key]).trim() : fallback;
         };
 
-        // 이미지 URL이 상대경로인 경우 보정
-        let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i);
+        let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i, item.image);
         if (imgSrc && imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
 
         return {
           id: idx,
           image: imgSrc,
-          title: findValue(/제목|상품명|명칭|title|name|text/i),
-          price: findValue(/가격|금액|원|price|cost/i),
-          shipping: findValue(/배송|택배|운임|shipping|delivery/i) || "정보없음",
-          mall: findValue(/판매처|스토어|몰|mall|seller|source/i) || "네이버페이"
+          title: findValue(/제목|상품명|명칭|title|name|text/i, item.title),
+          price: findValue(/가격|금액|원|price|cost/i, item.price),
+          shipping: findValue(/배송|택배|운임|shipping|delivery/i, item.shipping) || "정보없음",
+          mall: findValue(/판매처|스토어|몰|mall|seller|source/i, item.mall) || "네이버페이"
         };
-      }).filter(p => p.title && (p.price || p.image));
+      }).filter(p => p.title || p.image);
 
       if (mappedProducts.length > 0) {
         setResults(mappedProducts);
         setError(null);
-        // 성공 시 텍스트 영역 비우기 (선택사항)
-        // e.target.value = ""; 
       } else {
         setError("상품 정보를 찾을 수 없습니다. 리스틀리 상단의 [JSON] 버튼을 눌러 전체 내용을 복사했는지 확인해 주세요.");
       }
