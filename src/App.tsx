@@ -19,6 +19,11 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [myPrice, setMyPrice] = useState<number>(0);
 
+  const cleanText = (text: string) => {
+    if (!text) return "";
+    return text.replace(/https?:\/\/[^\s\t\n]+/g, '').replace(/LABEL-\d+/g, '').trim();
+  };
+
   const handlePaste = (e: React.ClipboardEvent | React.ChangeEvent<HTMLTextAreaElement>) => {
     let content = "";
     if ('clipboardData' in e) {
@@ -29,71 +34,87 @@ export default function App() {
 
     if (!content.trim()) return;
 
-    const lines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    const parsed: Product[] = [];
+    let parsed: Product[] = [];
     
-    let current: Partial<Product> = { id: 0, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
-    let tempId = 0;
+    // Check if it's likely an Excel TSV (Multiple tabs per line)
+    const lines = content.split(/\r?\n/);
+    const isTSV = lines.length > 0 && lines[0].split('\t').length > 5;
 
-    // State machine parser: more robust than block splitting
-    lines.forEach((line) => {
-      // 1. Detect Image URL (New product usually starts near an image)
-      const imgMatch = line.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
-      if (imgMatch) {
-        // If we already have a product in progress with a title, save it
-        if (current.title && current.price) {
-          parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
-          tempId++;
-          current = { id: tempId, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
+    if (isTSV) {
+      lines.forEach((line, idx) => {
+        const cols = line.split('\t');
+        if (cols.length < 10) return;
+
+        const title = cleanText(cols[5] || "");
+        const rawPrice = cols[7]?.replace(/[^0-9]/g, '') || "0";
+        const rawShipping = cols[9]?.replace(/[^0-9]/g, '') || "0";
+        const mall = cleanText(cols[33] || "");
+        const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
+        const isAd = line.includes('광고') || line.includes('AD');
+
+        const price = parseInt(rawPrice);
+        const shipping = parseInt(rawShipping);
+        
+        if (!isNaN(price) && title && price > 100) {
+          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd });
         }
-        current.image = imgMatch[0];
-        return;
-      }
+      });
+    } 
+    
+    // If TSV failed to find products or it's definitely not TSV, use sequential parser
+    if (parsed.length === 0) {
+      const cleanLines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      let current: Partial<Product> = { id: 0, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
+      let tempId = 0;
 
-      // 2. Detect AD
-      if (line === "광고" || line === "AD") {
-        current.isAd = true;
-        return;
-      }
-
-      // 3. Detect Price (Only if we don't have a price or it's the first price)
-      const priceMatch = line.match(/^([\d,]+)원$/) || line.match(/^[가-힣\w\s]*\s?([\d,]+)원$/);
-      if (priceMatch && !line.includes('배송비') && !line.includes('포인트')) {
-        const p = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-        if (p > 500) { // Valid sell price
-          if (!current.price) current.price = p;
+      cleanLines.forEach((line) => {
+        const imgMatch = line.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
+        if (imgMatch) {
+          if (current.title && current.price) {
+            parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
+            tempId++;
+            current = { id: tempId, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
+          }
+          current.image = imgMatch[0];
+          return;
         }
-        return;
-      }
 
-      // 4. Detect Shipping
-      if (line.includes('배송비')) {
-        if (line.includes('무료')) {
-          current.shipping = 0;
-        } else {
-          const shpMatch = line.match(/([\d,]+)원/);
-          if (shpMatch) current.shipping = parseInt(shpMatch[1].replace(/[^0-9]/g, ''));
+        if (line === "광고" || line === "AD") {
+          current.isAd = true;
+          return;
         }
-        return;
-      }
 
-      // 5. Detect Mall (Look for common patterns in Listly raw text)
-      const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리"];
-      let foundMall = mallKeywords.find(k => line.includes(k));
-      if (foundMall && !line.includes('원') && line.length < 20) {
-        current.mall = line.split(/\s{2,}|\t/)[0].trim();
-        return;
-      }
+        const priceMatch = line.match(/^([\d,]+)원$/) || line.match(/^[가-힣\w\s]*\s?([\d,]+)원$/);
+        if (priceMatch && !line.includes('배송비') && !line.includes('포인트')) {
+          const p = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
+          if (p > 500) if (!current.price) current.price = p;
+          return;
+        }
 
-      // 6. Detect Title (Longest string that isn't a URL or price)
-      if (line.length > 10 && !line.includes('http') && !line.includes('원') && !line.includes('구매') && !line.includes('리뷰')) {
-        if (!current.title) current.title = line.replace(/LABEL-\d+/g, '').trim();
-      }
-    });
+        if (line.includes('배송비')) {
+          if (line.includes('무료')) current.shipping = 0;
+          else {
+            const shpMatch = line.match(/([\d,]+)원/);
+            if (shpMatch) current.shipping = parseInt(shpMatch[1].replace(/[^0-9]/g, ''));
+          }
+          return;
+        }
 
-    // Push the last one
-    if (current.title && current.price) {
-      parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리"];
+        let foundMall = mallKeywords.find(k => line.includes(k));
+        if (foundMall && !line.includes('원') && line.length < 20) {
+          current.mall = line.split(/\s{2,}|\t/)[0].trim();
+          return;
+        }
+
+        if (line.length > 10 && !line.includes('http') && !line.includes('원') && !line.includes('구매') && !line.includes('리뷰')) {
+          if (!current.title) current.title = line.replace(/LABEL-\d+/g, '').trim();
+        }
+      });
+
+      if (current.title && current.price) {
+        parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
+      }
     }
 
     setResults(parsed);
@@ -107,12 +128,6 @@ export default function App() {
     window.open(`https://search.shopping.naver.com/search/all?query=${encodeURIComponent(keyword)}`, '_blank');
   };
 
-  const stats = {
-    min: results.length > 0 ? Math.min(...results.map(p => p.totalPrice)) : 0,
-    avg: results.length > 0 ? Math.round(results.reduce((acc, p) => acc + p.totalPrice, 0) / results.length) : 0,
-    count: results.length
-  };
-
   return (
     <div className="min-h-screen pb-20 bg-slate-50 font-sans">
       <header className="sticky top-0 z-50 bg-white border-b border-slate-200 shadow-sm">
@@ -123,7 +138,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Sequential Analysis Engine v2.2</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Multi-Parser Engine v2.3 (Excel + Raw)</p>
             </div>
           </div>
         </div>
