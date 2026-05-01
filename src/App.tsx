@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Loader2, Download, ExternalLink, Package, ShoppingBag, List, LayoutGrid, Store, Image as ImageIcon } from 'lucide-react';
+import { Search, Loader2, Download, ExternalLink, Package, ShoppingBag, List, LayoutGrid, Store, Image as ImageIcon, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Product {
@@ -10,6 +10,7 @@ interface Product {
   shipping: number;
   totalPrice: number;
   mall: string;
+  isAd: boolean;
 }
 
 export default function App() {
@@ -17,7 +18,6 @@ export default function App() {
   const [results, setResults] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [myPrice, setMyPrice] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
   const cleanText = (text: string) => {
     if (!text) return "";
@@ -46,51 +46,24 @@ export default function App() {
         const rawShipping = cols[9]?.replace(/[^0-9]/g, '') || "0";
         const mall = cleanText(cols[33] || "");
         const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
+        const isAd = line.includes('광고') || line.includes('AD');
 
         const price = parseInt(rawPrice);
         const shipping = parseInt(rawShipping);
         
         if (!isNaN(price) && title && price > 100) {
-          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가" });
+          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd });
         }
       });
     } else {
-      // Improved block parsing for raw text with better shipping detection
       const blocks = content.split(/(?=\d{8,20}\s+https?:\/\/)/g).filter(b => b.length > 50);
       
       blocks.forEach((block, idx) => {
         const imageMatch = block.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
-        
-        // Find all price-like patterns (numbers followed by '원')
         const priceMatches = block.match(/([\d,]+)원/g);
+        const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
+        const isAd = block.includes('광고') || block.includes('\nAD\n') || block.includes('\tAD\t');
         
-        // Strategy: First price is usually Selling Price, second is usually Shipping (unless it's a huge number)
-        let price = 0;
-        let shipping = 0;
-
-        if (priceMatches && priceMatches.length >= 2) {
-           price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
-           shipping = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
-           
-           // If second price is > 30000, it's probably not shipping (maybe original price)
-           // Unless first price is also huge. Standard shipping is usually < 20000.
-           if (shipping > 30000 && shipping > price) {
-             shipping = 0; // Likely original price, not shipping
-           }
-        } else if (priceMatches && priceMatches.length === 1) {
-           price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
-        }
-
-        // Secondary check for "배송비" keyword if the above strategy is unsure
-        const explicitShipping = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
-        if (explicitShipping) {
-          if (explicitShipping[1].includes('무료')) {
-            shipping = 0;
-          } else {
-            shipping = parseInt(explicitShipping[1].replace(/[^0-9]/g, ''));
-          }
-        }
-
         const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "판매처"];
         let mall = "정보없음";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
@@ -102,7 +75,18 @@ export default function App() {
 
         const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원'));
 
-        if (titleCandidate && price > 0) {
+        if (titleCandidate && priceMatches) {
+          const price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
+          let shipping = 0;
+          if (priceMatches.length >= 2) {
+            const possibleShipping = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
+            if (possibleShipping < 20000) shipping = possibleShipping;
+          }
+          if (shippingMatch) {
+            if (shippingMatch[1].includes('무료')) shipping = 0;
+            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+          }
+
           parsed.push({
             id: idx,
             image: imageMatch ? imageMatch[0] : "",
@@ -110,7 +94,8 @@ export default function App() {
             price,
             shipping,
             totalPrice: price + shipping,
-            mall: cleanText(mall) || "정보없음"
+            mall: cleanText(mall) || "정보없음",
+            isAd
           });
         }
       });
@@ -142,12 +127,9 @@ export default function App() {
               <ShoppingBag size={24} />
             </div>
             <div>
-              <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Cleaner Price Analyzer</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Url Filtering & Large Image Mode</p>
+              <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Advanced AD Filtering Mode</p>
             </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-xs font-black text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">Pro Mode</span>
           </div>
         </div>
       </header>
@@ -165,23 +147,22 @@ export default function App() {
                   <ExternalLink size={20} /> 네이버 쇼핑
                 </button>
               </div>
-
               <div className="relative">
                 <textarea 
                   onPaste={handlePaste}
                   className="w-full h-40 p-8 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] outline-none transition-all resize-none text-[10px] text-slate-300 font-mono"
-                  placeholder="리스틀리 복사본 붙여넣기 (Ctrl+V)..."
+                  placeholder="데이터 붙여넣기 (Ctrl+V)..."
                 />
               </div>
             </div>
           </div>
 
           <div className="space-y-6">
-            <div className="bg-[#03c75a] text-white p-8 rounded-[2.5rem] shadow-2xl shadow-green-900/10">
-              <h3 className="text-sm font-black text-white/60 mb-4 flex items-center gap-2">💰 내 타겟 판매가</h3>
+            <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl shadow-slate-900/10">
+              <h3 className="text-sm font-black text-slate-400 mb-4 flex items-center gap-2">💰 내 타겟 판매가</h3>
               <div className="relative mb-6">
-                <input type="number" value={myPrice || ''} onChange={(e) => setMyPrice(Number(e.target.value))} placeholder="비교할 가격" className="w-full px-6 py-5 bg-white/20 rounded-2xl border-2 border-white/10 focus:border-white outline-none transition-all font-black text-3xl text-white placeholder:text-white/40" />
-                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-white/30 text-xl">원</span>
+                <input type="number" value={myPrice || ''} onChange={(e) => setMyPrice(Number(e.target.value))} placeholder="비교할 가격" className="w-full px-6 py-5 bg-white/10 rounded-2xl border-2 border-white/5 focus:border-white outline-none transition-all font-black text-3xl text-white placeholder:text-white/20" />
+                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-white/20 text-xl">원</span>
               </div>
             </div>
           </div>
@@ -191,8 +172,11 @@ export default function App() {
           {results.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} className="mt-12">
               <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
-                <div className="px-10 py-6 bg-slate-50 border-b border-slate-200">
+                <div className="px-10 py-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <h2 className="font-black text-slate-800 flex items-center gap-2"><List size={20} /> 분석 결과 ({results.length}개 상품)</h2>
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div> 광고 자동 분류 중
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -219,9 +203,16 @@ export default function App() {
                               )}
                             </td>
                             <td className="px-8 py-6">
-                              <span className="font-black text-base text-slate-800 break-words leading-snug">
-                                {p.title}
-                              </span>
+                              <div className="flex flex-col gap-2">
+                                {p.isAd && (
+                                  <span className="inline-flex items-center gap-1 w-fit bg-orange-100 text-orange-600 px-2 py-0.5 rounded text-[10px] font-black tracking-tighter border border-orange-200">
+                                    <AlertCircle size={10} /> AD 광고
+                                  </span>
+                                )}
+                                <span className="font-black text-base text-slate-800 break-words leading-snug">
+                                  {p.title}
+                                </span>
+                              </div>
                             </td>
                             <td className="px-8 py-6 text-right font-black text-slate-900 text-2xl bg-slate-50/30 whitespace-nowrap">
                               {p.totalPrice.toLocaleString()}원
