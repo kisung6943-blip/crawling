@@ -36,35 +36,34 @@ export default function App() {
 
     let parsed: Product[] = [];
     
-    // 1. Precise Excel/TSV Detection
+    // 1. Ultra-Strict Excel Detection (Only if it looks like real CSV/TSV from Listly)
     const lines = content.split(/\r?\n/);
     const firstLineCols = lines[0].split('\t');
-    // It's a real TSV if it has many columns AND the price column (7) looks like a price pattern
-    const isRealTSV = firstLineCols.length > 20 && (
-      (firstLineCols[7] && /[\d,]+/.test(firstLineCols[7])) || 
-      (firstLineCols[5] && firstLineCols[5].length > 5)
-    );
+    const isStrictTSV = firstLineCols.length > 30 && firstLineCols[0].includes('http');
 
-    if (isRealTSV) {
+    if (isStrictTSV) {
       lines.forEach((line, idx) => {
         const cols = line.split('\t');
-        if (cols.length < 10) return;
+        if (cols.length < 35) return;
         const title = cleanText(cols[5] || "");
         const rawPrice = cols[7]?.replace(/[^0-9]/g, '') || "0";
         const rawShipping = cols[9]?.replace(/[^0-9]/g, '') || "0";
-        const mall = cleanText(cols[33] || "");
+        let mall = cleanText(cols[33] || "");
+        
+        // Clean mall name from numeric noise in TSV too
+        if (/^[\d\s()\[\]-]+$/.test(mall)) mall = "";
+
         const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
         const price = parseInt(rawPrice);
         const shipping = parseInt(rawShipping);
         
-        // Final sanity check for TSV data
-        if (!isNaN(price) && title && price > 500 && !/^\d+$/.test(mall)) {
-          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd: line.includes('광고') });
+        if (!isNaN(price) && title && price > 500 && mall && !/^[0-9()\[\]\s]+$/.test(mall)) {
+          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall, isAd: line.includes('광고') });
         }
       });
     } 
     
-    // 2. Raw Text Parsing (Sequential/Greedy) - Run if TSV yielded no valid products
+    // 2. Greedy Parser (v2.7) - The default for web-copied text
     if (parsed.length === 0) {
       const blocks = content.split(/(?=https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\?type=))/i).filter(b => b.length > 20);
       
@@ -105,8 +104,8 @@ export default function App() {
            const candidates = block.split(/\s+|\t|\n/).filter(s => 
              s.length >= 2 && s.length < 25 && 
              !s.includes('원') && !s.includes('http') && !s.includes('구매') && !s.includes('리뷰') && !s.includes('찜') && !s.includes('최대') && !s.includes('catId') &&
-             /[가-힣]/.test(s) && // MUST have Korean
-             !/^[0-9]+$/.test(s.replace(/[^0-9]/g, '')) // MUST NOT be purely numeric
+             /[가-힣]/.test(s) && 
+             !/^[0-9()\[\]\s-]+$/.test(s.replace(/[^0-9가-힣]/g, '')) // ABSOLUTE FILTER for numeric noise
            );
            if (candidates.length > 0) mall = candidates[candidates.length - 1].trim();
         }
@@ -115,7 +114,7 @@ export default function App() {
 
         if (titleCandidate && price > 0) {
           parsed.push({
-            id: idx, image: imageMatch ? imageMatch[0] : "", title: cleanText(titleCandidate), price, shipping, totalPrice: price + shipping, mall: cleanText(mall) || "확인불가", isAd
+            id: idx, image: imageMatch ? imageMatch[0] : "", title: cleanText(titleCandidate), price, shipping, totalPrice: price + shipping, mall: cleanText(mall) || "정보없음", isAd
           });
         }
       });
@@ -142,7 +141,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Smart Hybrid Engine v2.6 (Auto-Detection)</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Ultimate Detection Engine v2.7 (Zero-Noise)</p>
             </div>
           </div>
         </div>
