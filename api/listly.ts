@@ -11,43 +11,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const naverUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`;
     
-    // Attempt with the 'api/single' endpoint mentioned in Listly beta docs
-    // This endpoint often triggers a scrape and returns data if available
+    // According to research, Listly Beta API requires the token directly in the Authorization header
+    // and often uses the /api/single endpoint with a url parameter
     const response = await axios.get('https://www.listly.io/api/single', {
       params: {
-        key: api_key,
-        url: naverUrl
+        url: naverUrl,
+        key: api_key // Some versions use key in query
+      },
+      headers: {
+        'Authorization': api_key as string // Beta API often expects the raw token
       }
     });
 
-    // If it returns data immediately
+    // If data is returned immediately
     if (response.data && (response.data.results || response.data.data)) {
       const results = response.data.results || response.data.data;
       const bestTab = Array.isArray(results) ? results.sort((a, b) => b.length - a.length)[0] : results;
       return res.status(200).json({ status: 'COMPLETED', results: bestTab });
     }
 
-    // If it returns a job ID or something else
-    const jobId = response.data.id || response.data.job_id;
-    if (jobId) {
-      return res.status(200).json({ jobId, status: 'CREATED' });
+    // If it triggered a job and returned a status
+    if (response.data.status === 'PROCESSING' || response.data.status === 'CREATED') {
+       return res.status(200).json({ jobId: response.data.id || response.data.job_id, status: 'PROCESSING' });
     }
 
-    throw new Error('Unexpected API response format');
+    return res.status(200).json({ status: 'COMPLETED', results: response.data });
   } catch (error: any) {
-    console.error('Listly Single API Error:', error.response?.data || error.message);
+    console.error('Listly Beta API Error:', error.response?.data || error.message);
     
-    // Last ditch: try the group endpoint if single fails
+    // Fallback: Try with Bearer just in case
     try {
-      const resp2 = await axios.get('https://www.listly.io/api/group', {
-        params: { key: api_key, url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}` }
+      const response2 = await axios.get('https://www.listly.io/api/single', {
+        params: { url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}` },
+        headers: { 'Authorization': `Bearer ${api_key}` }
       });
-      return res.status(200).json({ results: resp2.data.results || resp2.data.data, status: 'COMPLETED' });
+      return res.status(200).json({ results: response2.data.results || response2.data.data, status: 'COMPLETED' });
     } catch (e2: any) {
       res.status(500).json({ 
-        error: '리스틀리 API 연동 실패 (Beta)', 
+        error: '리스틀리 베타 API 연동에 실패했습니다.', 
         details: error.response?.data || error.message,
-        tried_url: 'https://www.listly.io/api/single'
+        message: '리스틀리 계정의 API 권한을 확인해 주세요.'
       });
     }
   }
