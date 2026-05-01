@@ -36,11 +36,16 @@ export default function App() {
 
     let parsed: Product[] = [];
     
-    // Excel/TSV Parsing
+    // 1. Precise Excel/TSV Detection
     const lines = content.split(/\r?\n/);
-    const isTSV = lines.length > 0 && lines[0].split('\t').length > 5;
+    const firstLineCols = lines[0].split('\t');
+    // It's a real TSV if it has many columns AND the price column (7) looks like a price pattern
+    const isRealTSV = firstLineCols.length > 20 && (
+      (firstLineCols[7] && /[\d,]+/.test(firstLineCols[7])) || 
+      (firstLineCols[5] && firstLineCols[5].length > 5)
+    );
 
-    if (isTSV) {
+    if (isRealTSV) {
       lines.forEach((line, idx) => {
         const cols = line.split('\t');
         if (cols.length < 10) return;
@@ -51,13 +56,15 @@ export default function App() {
         const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
         const price = parseInt(rawPrice);
         const shipping = parseInt(rawShipping);
-        if (!isNaN(price) && title && price > 100) {
+        
+        // Final sanity check for TSV data
+        if (!isNaN(price) && title && price > 500 && !/^\d+$/.test(mall)) {
           parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd: line.includes('광고') });
         }
       });
     } 
     
-    // Raw Text Parsing (v2.5)
+    // 2. Raw Text Parsing (Sequential/Greedy) - Run if TSV yielded no valid products
     if (parsed.length === 0) {
       const blocks = content.split(/(?=https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\?type=))/i).filter(b => b.length > 20);
       
@@ -70,41 +77,35 @@ export default function App() {
         let shipping = 0;
 
         if (priceMatches) {
-          // Filter out potential points or small numbers incorrectly tagged as prices
           const prices = priceMatches.map(m => parseInt(m.replace(/[^0-9]/g, ''))).filter(p => p > 500);
           price = prices[0] || 0;
           
-          if (block.includes('배송비 무료')) {
+          if (block.includes('배송비 무료') || block.includes('무료배송')) {
             shipping = 0;
           } else {
             const shippingMatch = block.match(/배송비\s*([\d,]+원|[\d,]+)/i);
             if (shippingMatch) {
               shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
             } else if (prices.length >= 2) {
-              // Only take second price as shipping if it's in standard range
-              const secondPrice = prices[1];
-              if (secondPrice >= 1000 && secondPrice <= 15000) shipping = secondPrice;
+              for (let i = 1; i < prices.length; i++) {
+                if (prices[i] >= 1000 && prices[i] <= 15000) {
+                  shipping = prices[i];
+                  break;
+                }
+              }
             }
           }
         }
 
-        // Hardened Mall Detection
         const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리", "인터파크", "옥션", "G마켓", "11번가", "쿠팡", "판매처"];
         let mall = "";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
 
         if (!mall) {
-           // Find strings that are NOT just numbers and HAVE Korean characters
            const candidates = block.split(/\s+|\t|\n/).filter(s => 
-             s.length >= 2 && 
-             s.length < 20 && 
-             !s.includes('원') && 
-             !s.includes('http') && 
-             !s.includes('구매') && 
-             !s.includes('리뷰') &&
-             !s.includes('찜') &&
-             !s.includes('최대') &&
-             /[가-힣]/.test(s) && // MUST contain Korean
+             s.length >= 2 && s.length < 25 && 
+             !s.includes('원') && !s.includes('http') && !s.includes('구매') && !s.includes('리뷰') && !s.includes('찜') && !s.includes('최대') && !s.includes('catId') &&
+             /[가-힣]/.test(s) && // MUST have Korean
              !/^[0-9]+$/.test(s.replace(/[^0-9]/g, '')) // MUST NOT be purely numeric
            );
            if (candidates.length > 0) mall = candidates[candidates.length - 1].trim();
@@ -114,14 +115,7 @@ export default function App() {
 
         if (titleCandidate && price > 0) {
           parsed.push({
-            id: idx,
-            image: imageMatch ? imageMatch[0] : "",
-            title: cleanText(titleCandidate),
-            price,
-            shipping,
-            totalPrice: price + shipping,
-            mall: cleanText(mall) || "확인불가",
-            isAd
+            id: idx, image: imageMatch ? imageMatch[0] : "", title: cleanText(titleCandidate), price, shipping, totalPrice: price + shipping, mall: cleanText(mall) || "확인불가", isAd
           });
         }
       });
@@ -148,7 +142,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Nuclear Filtering Engine v2.5</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Smart Hybrid Engine v2.6 (Auto-Detection)</p>
             </div>
           </div>
         </div>
