@@ -1,0 +1,6 @@
+{
+  "name": "Naver Smart Extractor",
+  "description": "Smart web scraping tool that extracts product data (Image, Title, Price, Shipping, Store) from Naver Shopping results.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
