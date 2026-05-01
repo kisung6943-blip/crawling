@@ -36,7 +36,7 @@ export default function App() {
 
     let parsed: Product[] = [];
     
-    // Check if it's likely an Excel TSV (Multiple tabs per line)
+    // 1. Try Excel/TSV Parsing first
     const lines = content.split(/\r?\n/);
     const isTSV = lines.length > 0 && lines[0].split('\t').length > 5;
 
@@ -44,77 +44,79 @@ export default function App() {
       lines.forEach((line, idx) => {
         const cols = line.split('\t');
         if (cols.length < 10) return;
-
         const title = cleanText(cols[5] || "");
         const rawPrice = cols[7]?.replace(/[^0-9]/g, '') || "0";
         const rawShipping = cols[9]?.replace(/[^0-9]/g, '') || "0";
         const mall = cleanText(cols[33] || "");
         const image = cols.find(c => c.startsWith('http') && (c.includes('.jpg') || c.includes('.png') || c.includes('.pstatic.net'))) || "";
-        const isAd = line.includes('광고') || line.includes('AD');
-
         const price = parseInt(rawPrice);
         const shipping = parseInt(rawShipping);
-        
         if (!isNaN(price) && title && price > 100) {
-          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd });
+          parsed.push({ id: idx, image, title, price, shipping, totalPrice: price + shipping, mall: mall || "확인불가", isAd: line.includes('광고') });
         }
       });
     } 
     
-    // If TSV failed to find products or it's definitely not TSV, use sequential parser
+    // 2. If TSV failed or it's raw text, use "Greedy Block Parser" (v2.4)
     if (parsed.length === 0) {
-      const cleanLines = content.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-      let current: Partial<Product> = { id: 0, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
-      let tempId = 0;
+      // Split by image URL, regardless of line breaks
+      const blocks = content.split(/(?=https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\?type=))/i).filter(b => b.length > 20);
+      
+      blocks.forEach((block, idx) => {
+        const imageMatch = block.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
+        const priceMatches = block.match(/([\d,]+)원/g);
+        const isAd = block.includes('광고') || block.includes('AD');
+        
+        let price = 0;
+        let shipping = 0;
 
-      cleanLines.forEach((line) => {
-        const imgMatch = line.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
-        if (imgMatch) {
-          if (current.title && current.price) {
-            parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
-            tempId++;
-            current = { id: tempId, title: "", price: 0, shipping: 0, mall: "정보없음", image: "", isAd: false };
+        if (priceMatches) {
+          const prices = priceMatches.map(m => parseInt(m.replace(/[^0-9]/g, '')));
+          price = prices[0];
+          
+          const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
+          if (shippingMatch) {
+            if (shippingMatch[1].includes('무료')) shipping = 0;
+            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+          } else {
+            // Find a price in shipping range (1000~15000) that isn't the main price
+            for (let i = 1; i < prices.length; i++) {
+              if (prices[i] >= 1000 && prices[i] <= 15000 && prices[i] !== price) {
+                shipping = prices[i];
+                break;
+              }
+            }
           }
-          current.image = imgMatch[0];
-          return;
         }
 
-        if (line === "광고" || line === "AD") {
-          current.isAd = true;
-          return;
-        }
-
-        const priceMatch = line.match(/^([\d,]+)원$/) || line.match(/^[가-힣\w\s]*\s?([\d,]+)원$/);
-        if (priceMatch && !line.includes('배송비') && !line.includes('포인트')) {
-          const p = parseInt(priceMatch[1].replace(/[^0-9]/g, ''));
-          if (p > 500) if (!current.price) current.price = p;
-          return;
-        }
-
-        if (line.includes('배송비')) {
-          if (line.includes('무료')) current.shipping = 0;
-          else {
-            const shpMatch = line.match(/([\d,]+)원/);
-            if (shpMatch) current.shipping = parseInt(shpMatch[1].replace(/[^0-9]/g, ''));
-          }
-          return;
-        }
-
+        // Improved Mall Detection
         const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓", "컴퍼니", "리빙", "몰", "겔러리", "갤러리"];
-        let foundMall = mallKeywords.find(k => line.includes(k));
-        if (foundMall && !line.includes('원') && line.length < 20) {
-          current.mall = line.split(/\s{2,}|\t/)[0].trim();
-          return;
+        let mall = "정보없음";
+        mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
+
+        if (mall === "정보없음") {
+           const candidates = block.split(/\s{2,}|\t|\n/).filter(s => 
+             s.length >= 2 && s.length < 15 && !s.includes('원') && !s.includes('http') && !s.includes('구매') && !/^\d+$/.test(s.trim())
+           );
+           if (candidates.length > 0) mall = candidates[candidates.length - 1].trim();
         }
 
-        if (line.length > 10 && !line.includes('http') && !line.includes('원') && !line.includes('구매') && !line.includes('리뷰')) {
-          if (!current.title) current.title = line.replace(/LABEL-\d+/g, '').trim();
+        // Improved Title Detection
+        const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원') && !s.includes('catId') && !s.includes('nvMid'));
+
+        if (titleCandidate && price > 0) {
+          parsed.push({
+            id: idx,
+            image: imageMatch ? imageMatch[0] : "",
+            title: cleanText(titleCandidate),
+            price,
+            shipping,
+            totalPrice: price + shipping,
+            mall: cleanText(mall) || "정보없음",
+            isAd
+          });
         }
       });
-
-      if (current.title && current.price) {
-        parsed.push({ ...current, totalPrice: (current.price || 0) + (current.shipping || 0) } as Product);
-      }
     }
 
     setResults(parsed);
@@ -138,7 +140,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Multi-Parser Engine v2.3 (Excel + Raw)</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Greedy All-in-One Engine v2.4</p>
             </div>
           </div>
         </div>
