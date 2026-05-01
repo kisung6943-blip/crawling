@@ -17,23 +17,71 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!keyword.trim()) return;
+  const handlePaste = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    if (!value.trim()) return;
 
-    setIsLoading(true);
-    setError(null);
     try {
-      const response = await fetch(`/api/scrape?q=${encodeURIComponent(keyword)}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      setResults(data.results || []);
+      // Try parsing as JSON first (Listly JSON export)
+      let parsedData: any[] = [];
+      
+      if (value.startsWith('[') || value.startsWith('{')) {
+        parsedData = JSON.parse(value);
+        if (!Array.isArray(parsedData) && typeof parsedData === 'object') {
+          // Sometimes it's { data: [...] }
+          parsedData = (parsedData as any).data || Object.values(parsedData)[0];
+        }
+      } else {
+        // Fallback: Try parsing as Tab-separated (when copying table directly)
+        const lines = value.split('\n');
+        const headers = lines[0].split('\t');
+        parsedData = lines.slice(1).map(line => {
+          const cells = line.split('\t');
+          const obj: any = {};
+          headers.forEach((h, i) => { obj[h] = cells[i]; });
+          return obj;
+        });
+      }
+
+      // Map Listly columns to our Product structure
+      // Listly columns are often named by their header text
+      const mappedProducts: Product[] = parsedData.map((item: any, idx: number) => {
+        // Find keys that might represent our fields
+        const keys = Object.keys(item);
+        const findValue = (regex: RegExp) => {
+          const key = keys.find(k => regex.test(k));
+          return key ? item[key] : "";
+        };
+
+        return {
+          id: idx,
+          image: findValue(/이미지|사진|image|thumb/i),
+          title: findValue(/제목|상품명|title|name/i),
+          price: findValue(/가격|price/i),
+          shipping: findValue(/배송|택배|shipping/i) || "정보없음",
+          mall: findValue(/판매처|스토어|mall|seller/i) || "네이버페이"
+        };
+      }).filter(p => p.title && p.price);
+
+      if (mappedProducts.length > 0) {
+        setResults(mappedProducts);
+        setError(null);
+      } else {
+        setError("데이터 형식이 올바르지 않거나 유효한 상품 정보를 찾을 수 없습니다.");
+      }
     } catch (err) {
-      setError('데이터를 가져오는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
-      console.error(err);
-    } finally {
-      setIsLoading(false);
+      console.error("Paste error:", err);
+      setError("데이터를 분석하는 중 오류가 발생했습니다. 리스틀리에서 '복사'를 제대로 하셨는지 확인해 주세요.");
     }
+  };
+
+  const openNaver = () => {
+    if (!keyword.trim()) {
+      alert("먼저 검색 키워드를 입력해 주세요.");
+      return;
+    }
+    const url = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(keyword)}`;
+    window.open(url, '_blank');
   };
 
   const exportToCSV = () => {
@@ -41,7 +89,7 @@ export default function App() {
     
     const headers = ['제목', '가격', '배송비', '판매점', '이미지URL'];
     const rows = results.map(p => [
-      `"${p.title.replace(/"/g, '""')}"`,
+      `"${String(p.title).replace(/"/g, '""')}"`,
       p.price,
       p.shipping,
       p.mall,
@@ -53,7 +101,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `naver_extract_${keyword}.csv`);
+    link.setAttribute("download", `naver_listly_${keyword || 'data'}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -86,33 +134,61 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 mt-8">
-        {/* Search Section */}
+        {/* How to use Guide */}
+        <section className="mb-10">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl mx-auto">
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+              <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-bold mb-3">1</div>
+              <p className="text-sm font-bold text-slate-700">네이버 쇼핑에서 검색</p>
+              <p className="text-xs text-slate-400 mt-1">키워드 입력 후 '검색창 열기' 클릭</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+              <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-bold mb-3">2</div>
+              <p className="text-sm font-bold text-slate-700">리스틀리로 추출</p>
+              <p className="text-xs text-slate-400 mt-1">확장프로그램 실행 후 '데이터 복사'</p>
+            </div>
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+              <div className="w-10 h-10 bg-[#03c75a] text-white rounded-full flex items-center justify-center font-bold mb-3">3</div>
+              <p className="text-sm font-bold text-slate-700">여기에 붙여넣기</p>
+              <p className="text-xs text-slate-400 mt-1">아래 입력창에 Ctrl+V 하세요</p>
+            </div>
+          </div>
+        </section>
+
+        {/* Action Section */}
         <section className="mb-12">
-          <div className="max-w-2xl mx-auto text-center">
-            <h2 className="text-3xl font-display font-extrabold mb-4 text-slate-900 leading-tight">
-              네이버 쇼핑 데이터를 <span className="text-[#03c75a]">한 번에</span> 추출하세요
-            </h2>
-            <p className="text-slate-500 mb-8 max-w-lg mx-auto">
-              키워드를 입력하면 이미지, 제목, 가격, 배송비, 판매처를 한 번에 수집하여 정리해드립니다.
-            </p>
-            
-            <form onSubmit={handleSearch} className="relative group">
-              <input
-                type="text"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="검색할 상품 키워드를 입력하세요..."
-                className="w-full pl-14 pr-32 py-5 bg-white rounded-2xl border-2 border-slate-100 shadow-xl focus:border-[#03c75a] focus:ring-4 focus:ring-green-500/5 outline-none transition-all text-lg"
-              />
-              <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#03c75a] transition-colors" size={24} />
+          <div className="max-w-3xl mx-auto">
+            <div className="flex flex-col sm:flex-row gap-3 mb-6">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  placeholder="검색 키워드 (예: 휘슬러 고무패킹)"
+                  className="w-full pl-12 pr-4 py-4 bg-white rounded-xl border-2 border-slate-100 outline-none focus:border-[#03c75a] transition-all"
+                />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+              </div>
               <button
-                type="submit"
-                disabled={isLoading}
-                className="absolute right-3 top-1/2 -translate-y-1/2 naver-btn h-12 flex items-center justify-center min-w-[100px]"
+                onClick={openNaver}
+                className="px-6 py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
               >
-                {isLoading ? <Loader2 className="animate-spin" /> : '추출하기'}
+                <ExternalLink size={18} />
+                네이버 검색창 열기
               </button>
-            </form>
+            </div>
+
+            <div className="relative group">
+              <textarea
+                onChange={handlePaste}
+                placeholder="리스틀리에서 복사한 데이터를 여기에 붙여넣으세요 (Ctrl+V)..."
+                className="w-full h-40 p-6 bg-white rounded-2xl border-2 border-dashed border-slate-200 shadow-inner focus:border-[#03c75a] focus:ring-4 focus:ring-green-500/5 outline-none transition-all resize-none text-slate-600"
+              />
+              <div className="absolute right-4 bottom-4 flex items-center gap-2 text-slate-300 group-focus-within:text-[#03c75a] transition-colors pointer-events-none">
+                <Package size={20} />
+                <span className="text-sm font-bold uppercase tracking-wider">Paste Listly Data</span>
+              </div>
+            </div>
           </div>
         </section>
 
