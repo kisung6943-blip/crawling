@@ -32,92 +32,94 @@ export default function App() {
         } catch (e) { }
       } 
       
-      // 2. 구분자(Tab/Comma) 기반 시도
+      // 2. Tab/Comma 구분자 기반 시도 (전체 텍스트에서 최적의 구분자 검색)
       if (parsedData.length === 0) {
-        const lines = value.split(/\r?\n/).filter(l => l.trim());
-        const firstLine = lines[0] || "";
-        const delimiter = firstLine.includes('\t') ? '\t' : (firstLine.includes(',') ? ',' : null);
+        const lines = value.split(/\r?\n/).filter(l => l.trim().length > 5);
+        
+        // 탭이나 콤마가 가장 많이 포함된 라인을 기준으로 구분자 결정
+        let maxTabs = 0;
+        let maxCommas = 0;
+        lines.forEach(l => {
+          maxTabs = Math.max(maxTabs, (l.match(/\t/g) || []).length);
+          maxCommas = Math.max(maxCommas, (l.match(/,/g) || []).length);
+        });
+        
+        const delimiter = maxTabs >= 2 ? '\t' : (maxCommas >= 2 ? ',' : null);
         
         if (delimiter) {
-          const headers = firstLine.split(delimiter).map(h => h.trim().replace(/"/g, ''));
-          parsedData = lines.slice(1).map(line => {
+          parsedData = lines.map(line => {
             const cells = line.split(delimiter).map(c => c.trim().replace(/"/g, ''));
+            
+            // 컬럼 제목이 없는 경우를 위해 내용 기반으로 필드 유추
             const obj: any = {};
-            headers.forEach((h, i) => { if (h) obj[h] = cells[i]; });
+            cells.forEach(cell => {
+              if (cell.match(/^https?:\/\/.*?\.(jpg|jpeg|png|gif|webp)/i)) obj.image = cell;
+              else if (cell.match(/^https?:\/\//i) && !obj.link) obj.link = cell;
+              else if (cell.includes('원') || cell.match(/^[\d,]+$/)) {
+                if (!obj.price || obj.price.length < cell.length) obj.price = cell;
+              }
+              else if (cell.includes('배송비')) obj.shipping = cell;
+              else if (cell.includes('몰') || cell.includes('점') || cell.includes('판매처')) obj.mall = cell;
+              else if (cell.length > 5 && !obj.title) obj.title = cell;
+            });
             return obj;
           });
         }
       }
 
-      // 3. 지능형 패턴 추출 (구조가 깨진 텍스트 블록)
-      if (parsedData.length === 0) {
-        // 상품 제목, 가격, 배송비 등의 키워드가 포함된 텍스트 덩어리를 분석
-        // 보통 상품 하나당 이미지 URL과 정보 텍스트가 순차적으로 나옴
-        const textBlocks = value.split(/(https?:\/\/[^\s]+(?:\.jpg|\.png|\.gif|\.jpeg)[^\s]*)/i).filter(b => b.trim());
+      // 3. 지능형 패턴 추출 (이미지 URL 중심)
+      if (parsedData.length === 0 || parsedData.every(d => !d.title)) {
+        const regex = /(https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg)[^\s\t\n]*)/gi;
+        const images = value.match(regex) || [];
+        const textParts = value.split(regex);
         
-        for (let i = 0; i < textBlocks.length; i++) {
-          const block = textBlocks[i].trim();
+        parsedData = images.map((img, i) => {
+          const info = textParts[i + 1] || "";
+          const priceMatch = info.match(/([\d,]+)원|최저\s*([\d,]+)/);
+          const shippingMatch = info.match(/배송비\s*([\d,]+원|무료|[\d,]+)/);
+          const titleMatch = info.match(/[가-힣\w\s]{5,100}/); // 대략적인 제목 매칭
           
-          // 이미지 주소인 경우
-          if (block.match(/^https?:\/\//i)) {
-            const nextBlock = textBlocks[i + 1] || "";
-            // 다음 블록에서 정보 추출
-            const priceMatch = nextBlock.match(/([\d,]+)원|최저\s*([\d,]+)/);
-            const shippingMatch = nextBlock.match(/배송비\s*([\d,]+원|무료|[\d,]+)/);
-            const mallMatch = nextBlock.match(/판매처\s*(\d+)|([가-힣\w\s]+몰|[가-힣\w\s]+닷컴|[가-힣\w\s]+점)/);
-            
-            // 제목 추출 (보통 블록의 앞부분)
-            const titleLines = nextBlock.split(/\n/);
-            const title = titleLines[0].length > 5 ? titleLines[0] : (titleLines[1] || block).substring(0, 100);
-
-            parsedData.push({
-              image: block,
-              title: title.trim(),
-              price: priceMatch ? (priceMatch[1] || priceMatch[2]) : "정보없음",
-              shipping: shippingMatch ? shippingMatch[1] || shippingMatch[0] : "정보없음",
-              mall: mallMatch ? mallMatch[1] || mallMatch[2] || mallMatch[0] : "네이버페이"
-            });
-            i++; // 정보 블록 건너뜀
-          }
-        }
-      }
-
-      // 최후의 수단: 줄바꿈 기반으로 그냥 다 넣기
-      if (parsedData.length === 0) {
-        const lines = value.split(/\n/).filter(l => l.trim().length > 10);
-        parsedData = lines.map(line => ({ title: line, price: "분석실패" }));
+          return {
+            image: img,
+            title: titleMatch ? titleMatch[0].trim() : "상품명 없음",
+            price: priceMatch ? (priceMatch[1] || priceMatch[2]) : "정보없음",
+            shipping: shippingMatch ? shippingMatch[1] || shippingMatch[0] : "정보없음",
+          };
+        });
       }
 
       // 데이터 매핑 및 보정
-      const mappedProducts: Product[] = parsedData.map((item: any, idx: number) => {
-        const keys = Object.keys(item);
-        const findValue = (regex: RegExp, fallback: string = "") => {
-          const key = keys.find(k => regex.test(k));
-          return key ? String(item[key]).trim() : fallback;
-        };
+      const mappedProducts: Product[] = parsedData
+        .filter(item => item.image || item.title)
+        .map((item: any, idx: number) => {
+          const findValue = (regex: RegExp, fallback: any = "") => {
+            const key = Object.keys(item).find(k => regex.test(k));
+            return key ? String(item[key]).trim() : fallback;
+          };
 
-        let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i, item.image);
-        if (imgSrc && imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
+          let imgSrc = findValue(/이미지|사진|image|thumb|src|img/i, item.image);
+          if (imgSrc && imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc;
 
-        return {
-          id: idx,
-          image: imgSrc,
-          title: findValue(/제목|상품명|명칭|title|name|text/i, item.title),
-          price: findValue(/가격|금액|원|price|cost/i, item.price),
-          shipping: findValue(/배송|택배|운임|shipping|delivery/i, item.shipping) || "정보없음",
-          mall: findValue(/판매처|스토어|몰|mall|seller|source/i, item.mall) || "네이버페이"
-        };
-      }).filter(p => p.title || p.image);
+          return {
+            id: idx,
+            image: imgSrc,
+            title: findValue(/제목|상품명|명칭|title|name|text/i, item.title),
+            price: findValue(/가격|금액|원|price|cost/i, item.price),
+            shipping: findValue(/배송|택배|운임|shipping|delivery/i, item.shipping) || "정보없음",
+            mall: findValue(/판매처|스토어|몰|mall|seller|source/i, item.mall) || "네이버페이"
+          };
+        })
+        .filter(p => p.title && p.title.length > 2);
 
       if (mappedProducts.length > 0) {
         setResults(mappedProducts);
         setError(null);
       } else {
-        setError("상품 정보를 찾을 수 없습니다. 리스틀리 상단의 [JSON] 버튼을 눌러 전체 내용을 복사했는지 확인해 주세요.");
+        setError("유효한 상품 정보를 찾을 수 없습니다. 리스틀리에서 데이터를 다시 복사해 주세요.");
       }
     } catch (err) {
       console.error("Paste error:", err);
-      setError("데이터 분석 중 오류가 발생했습니다. 올바른 형식의 데이터를 붙여넣어 주세요.");
+      setError("데이터 분석 중 오류가 발생했습니다.");
     }
   };
 
