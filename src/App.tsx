@@ -61,32 +61,54 @@ export default function App() {
       blocks.forEach((block, idx) => {
         const imageMatch = block.match(/https?:\/\/[^\s\t\n]+(?:\.jpg|\.png|\.gif|\.jpeg|\?type=[a-z0-9]+)/i);
         const priceMatches = block.match(/([\d,]+)원/g);
-        const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
         const isAd = block.includes('광고') || block.includes('\nAD\n') || block.includes('\tAD\t');
         
-        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "판매처"];
+        let price = 0;
+        let shipping = 0;
+
+        // More robust price and shipping detection
+        if (priceMatches) {
+          price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
+          
+          // Look for explicit shipping keyword first
+          const shippingMatch = block.match(/배송비\s*([\d,]+원|무료|[\d,]+)/i);
+          if (shippingMatch) {
+            if (shippingMatch[1].includes('무료')) shipping = 0;
+            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
+          } else if (priceMatches.length >= 2) {
+            // Fallback: second price is often shipping IF it's between 100 and 20000
+            const secondPrice = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
+            if (secondPrice >= 1000 && secondPrice <= 20000) {
+              shipping = secondPrice;
+            }
+          }
+        }
+
+        const mallKeywords = ["ES리빙", "네이버플러스", "백화점", "아울렛", "공식", "전문점", "쇼핑몰", "스토어", "마켓"];
         let mall = "정보없음";
         mallKeywords.forEach(k => { if (block.includes(k)) mall = k; });
 
         if (mall === "정보없음") {
-           const potentialMall = block.split(/\s{2,}|\t|\n/).find(s => s.length > 2 && s.length < 15 && !s.includes('원') && !s.includes('http') && !s.includes('구매'));
-           if (potentialMall) mall = potentialMall.trim();
+           // Improved mall detection: Look for strings that are NOT pure numbers and NOT already used
+           const candidates = block.split(/\s{2,}|\t|\n/).filter(s => 
+             s.length >= 2 && 
+             s.length < 20 && 
+             !s.includes('원') && 
+             !s.includes('http') && 
+             !s.includes('구매') && 
+             !s.includes('리뷰') &&
+             !/^\d+$/.test(s.trim()) // EXCLUDE PURE NUMBERS
+           );
+           
+           // Usually the mall name is near the end or after the price block
+           if (candidates.length > 0) {
+             mall = candidates[candidates.length - 1].trim();
+           }
         }
 
         const titleCandidate = block.split(/\s{2,}|\t|\n/).find(s => s.length > 10 && !s.includes('http') && !s.includes('원'));
 
-        if (titleCandidate && priceMatches) {
-          const price = parseInt(priceMatches[0].replace(/[^0-9]/g, ''));
-          let shipping = 0;
-          if (priceMatches.length >= 2) {
-            const possibleShipping = parseInt(priceMatches[1].replace(/[^0-9]/g, ''));
-            if (possibleShipping < 20000) shipping = possibleShipping;
-          }
-          if (shippingMatch) {
-            if (shippingMatch[1].includes('무료')) shipping = 0;
-            else shipping = parseInt(shippingMatch[1].replace(/[^0-9]/g, ''));
-          }
-
+        if (titleCandidate && price > 0) {
           parsed.push({
             id: idx,
             image: imageMatch ? imageMatch[0] : "",
@@ -128,7 +150,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-black text-xl tracking-tight text-slate-800 uppercase">Pro Price Intelligence</h1>
-              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Advanced AD Filtering Mode</p>
+              <p className="text-[10px] text-[#03c75a] font-black tracking-widest italic">Smart Data Cleansing Active</p>
             </div>
           </div>
         </div>
@@ -174,9 +196,6 @@ export default function App() {
               <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-2xl shadow-slate-200/50">
                 <div className="px-10 py-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <h2 className="font-black text-slate-800 flex items-center gap-2"><List size={20} /> 분석 결과 ({results.length}개 상품)</h2>
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400">
-                    <div className="w-2 h-2 rounded-full bg-orange-400 animate-pulse"></div> 광고 자동 분류 중
-                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
