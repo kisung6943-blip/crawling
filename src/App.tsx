@@ -199,6 +199,7 @@ export default function App() {
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest min-w-[300px]">상품 상세 정보</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right bg-slate-100/50 min-w-[150px]">합산 가격</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[120px]">판매가</th>
+                        <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right min-w-[100px]">배송비</th>
                         <th className="px-8 py-5 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center min-w-[150px]">판매처</th>
                       </tr>
                     </thead>
@@ -228,6 +229,7 @@ export default function App() {
                               )}
                             </td>
                             <td className="px-8 py-6 text-right font-bold text-slate-400 text-sm whitespace-nowrap">{p.price.toLocaleString()}원</td>
+                            <td className="px-8 py-6 text-right font-bold text-slate-400 text-sm whitespace-nowrap">{p.shipping === 0 ? '무료' : `${p.shipping.toLocaleString()}원`}</td>
                             <td className="px-8 py-6 text-center">
                               <span className="text-xs font-black text-slate-700 bg-white border-2 border-slate-100 px-4 py-2 rounded-xl inline-block shadow-sm">
                                 {p.mall}
