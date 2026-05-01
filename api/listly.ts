@@ -11,36 +11,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const naverUrl = `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`;
     
-    // According to Listly docs, some endpoints use 'key' instead of 'api_key'
-    // And for triggering a new scrape, some users use the 'single' endpoint with a URL
-    // Let's try the most common 'trigger' endpoint for Listly API
-    const response = await axios.get('https://www.listly.io/api/v1/jobs/create', {
-      params: {
-        url: naverUrl,
-        api_key: api_key
+    // Attempt 1: Developer API Endpoint (api.listly.io)
+    // This is the most common endpoint for developers
+    const response = await axios.post('https://api.listly.io/v1/jobs', {
+      url: naverUrl
+    }, {
+      headers: {
+        'Authorization': `Bearer ${api_key}`,
+        'Content-Type': 'application/json'
       }
     });
 
-    const jobId = response.data.id || response.data.job_id;
-    if (!jobId) throw new Error('Failed to create Listly job. Check if your API key supports dynamic URL scraping.');
-
-    return res.status(200).json({ jobId, status: 'CREATED' });
+    return res.status(200).json({ jobId: response.data.id, status: 'CREATED' });
   } catch (error: any) {
-    console.error('Listly Create Job Error:', error.response?.data || error.message);
+    console.error('Attempt 1 Failed:', error.message);
     
-    // If v1 fails, try the other known endpoint format
+    // Attempt 2: Alternative Endpoint with Query Key
     try {
-       const altResponse = await axios.post('https://www.listly.io/api/v1/jobs', {
-         url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`,
-         api_key: api_key
-       });
-       return res.status(200).json({ jobId: altResponse.data.id, status: 'CREATED' });
+      const response2 = await axios.post(`https://www.listly.io/api/v1/jobs?api_key=${api_key}`, {
+        url: `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(q as string)}`
+      });
+      return res.status(200).json({ jobId: response2.data.id, status: 'CREATED' });
     } catch (e2: any) {
-       res.status(500).json({ 
-         error: 'Listly API 접속 주소가 올바르지 않거나 권한이 없습니다.', 
-         details: error.response?.data?.message || error.message,
-         endpoint_tried: 'https://www.listly.io/api/v1/jobs'
-       });
+      // If all fail, return detailed HTML/Text response for debugging
+      const errorDetail = e2.response?.data || error.response?.data || e2.message;
+      res.status(500).json({ 
+        error: '모든 API 엔드포인트 접속에 실패했습니다.', 
+        details: typeof errorDetail === 'string' ? errorDetail.substring(0, 500) : JSON.stringify(errorDetail),
+        tried: ['api.listly.io/v1/jobs', 'www.listly.io/api/v1/jobs']
+      });
     }
   }
 }

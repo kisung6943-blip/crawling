@@ -9,26 +9,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Try v1 status endpoint
-    const statusResponse = await axios.get(`https://www.listly.io/api/v1/jobs/${jobId}`, {
-      params: { api_key: api_key }
+    // Try api.listly.io first
+    const response = await axios.get(`https://api.listly.io/v1/jobs/${jobId}`, {
+      headers: { 'Authorization': `Bearer ${api_key}` }
     });
     
-    const status = statusResponse.data.status;
-
-    if (status === 'COMPLETED' || status === 'DONE') {
-      const resultResponse = await axios.get(`https://www.listly.io/api/v1/jobs/${jobId}/results`, {
-        params: { api_key: api_key }
+    if (response.data.status === 'COMPLETED') {
+      const resultResponse = await axios.get(`https://api.listly.io/v1/jobs/${jobId}/results`, {
+        headers: { 'Authorization': `Bearer ${api_key}` }
       });
       const results = resultResponse.data.results;
       const bestTab = Array.isArray(results) ? results.sort((a, b) => b.length - a.length)[0] : results;
-      
       return res.status(200).json({ status: 'COMPLETED', results: bestTab });
     }
 
     return res.status(200).json({ status: 'PROCESSING' });
   } catch (error: any) {
-    console.error('Listly Status Error:', error.response?.data || error.message);
-    res.status(500).json({ error: '상태 확인 중 오류가 발생했습니다.', details: error.response?.data || error.message });
+    // Fallback to www.listly.io
+    try {
+      const response2 = await axios.get(`https://www.listly.io/api/v1/jobs/${jobId}?api_key=${api_key}`);
+      if (response2.data.status === 'COMPLETED') {
+        const res2 = await axios.get(`https://www.listly.io/api/v1/jobs/${jobId}/results?api_key=${api_key}`);
+        return res.status(200).json({ status: 'COMPLETED', results: res2.data.results });
+      }
+      return res.status(200).json({ status: 'PROCESSING' });
+    } catch (e2: any) {
+      res.status(500).json({ error: '상태 확인 실패', details: e2.message });
+    }
   }
 }
